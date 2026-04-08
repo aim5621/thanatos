@@ -31,7 +31,7 @@ pub struct Package {
 
 impl Package {
     pub fn install(&self) {
-        //TODO: STUB COMPLETE LATER
+        //TODO: STUB
         println!("{}", self.name);
     }
 }
@@ -49,6 +49,6 @@ impl System {
             package.install()
         }
 
-        //TODO: STUB COMPLETE LATER
+        //TODO: STUB
     }
 }
