@@ -29,9 +29,26 @@ pub struct Package {
     build_deps: Vec<Package>,
 }
 
+impl Package {
+    pub fn install(&self) {
+        //TODO: STUB COMPLETE LATER
+        println!("{}", self.name);
+    }
+}
+
 pub struct System {
-    packages: Vec<String>,
+    packages: Vec<Package>,
     hostname: String,
     users: Vec<User>,
     groups: Vec<Group>,
+}
+
+impl System {
+    pub fn build(&self) {
+        for package in &self.packages {
+            package.install()
+        }
+
+        //TODO: STUB COMPLETE LATER
+    }
 }
