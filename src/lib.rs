@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 use std::vec::Vec;
+mod package;
+use crate::package::*;
 
 pub struct User {
     name: String,
@@ -16,26 +18,6 @@ pub struct Group {
     group_list: Vec<User>,
 }
 
-enum PackageType {
-    Lib,
-    Bin,
-}
-
-pub struct Package {
-    name: String,
-    path: String,
-    r#type: PackageType,
-    dependencies: Vec<Package>,
-    build_deps: Vec<Package>,
-}
-
-impl Package {
-    pub fn install(&self) {
-        //TODO: STUB
-        println!("{}", self.name);
-    }
-}
-
 pub struct System {
     packages: Vec<Package>,
     hostname: String,
@@ -44,11 +26,11 @@ pub struct System {
 }
 
 impl System {
-    pub fn build(&self) {
+    pub fn build(&self) -> Result<(), Box<dyn std::error::Error>> {
         for package in &self.packages {
-            package.install()
+            package.install(&package.name)?;
         }
-
         //TODO: STUB
+        Ok(())
     }
 }
