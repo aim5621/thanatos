@@ -1,6 +1,6 @@
 # Thanatos
 
-A declarative atomic linux distro written in rust.
+A declarative atomic linux distro written and configured in rust.
 
 # Licensing
 
