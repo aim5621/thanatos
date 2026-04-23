@@ -1,4 +1,6 @@
+use crate::package::db::{InstalledPackage, PackageDb};
 use reqwest::blocking::get;
+use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -132,7 +134,67 @@ fn parse_function(lines: &mut std::iter::Peekable<std::str::Lines>) -> String {
 }
 
 impl PkgBuild {
-    pub fn process(&self) {}
+    pub fn process(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut db = PackageDb::load()?;
+
+        if db.is_installed(&self.name) {
+            println!("package '{}' is already installed", self.name);
+            return Ok(());
+        }
+
+        let build_dir = PathBuf::from(format!("/tmp/thanatos/{}-{}", self.name, self.version));
+        let staging_dir = build_dir.join("pkg");
+
+        std::fs::create_dir_all(&build_dir)?;
+        std::fs::create_dir_all(&staging_dir)?;
+
+        for (source, checksum) in self.sources.iter().zip(self.checksums.iter()) {
+            let fetched = fetch_source(source, &build_dir)?;
+            verify_checksum(&fetched, checksum)?;
+        }
+
+        if !self.build_fn.is_empty() {
+            run_build_fn(&self.build_fn, &build_dir)?;
+        }
+
+        if !self.package_fn.is_empty() {
+            run_package_fn(&self.package_fn, &build_dir, &staging_dir)?;
+        }
+
+        let installed_files = collect_files(&staging_dir)?;
+
+        install_from_staging(&staging_dir)?;
+
+        db.insert(InstalledPackage {
+            name: self.name.clone(),
+            version: self.version.clone(),
+            release: self.release,
+            depends: self.depends.clone(),
+            files: installed_files,
+        });
+
+        db.save()?;
+
+        std::fs::remove_dir_all(&build_dir)?;
+
+        println!("installed {}-{}", self.name, self.version);
+
+        Ok(())
+    }
+}
+
+pub(crate) fn collect_files(staging_dir: &Path) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut files = vec![];
+
+    for entry in walkdir::WalkDir::new(staging_dir) {
+        let entry = entry?;
+        if entry.file_type().is_file() {
+            let relative = entry.path().strip_prefix(staging_dir)?;
+            files.push(format!("/{}", relative.to_str().unwrap()));
+        }
+    }
+
+    Ok(files)
 }
 
 pub enum Source {
@@ -203,6 +265,78 @@ pub fn run_build_fn(build_fn: &str, build_dir: &Path) -> Result<(), Box<dyn std:
 
     if !status.success() {
         return Err(format!("build failed with status: {}", status).into());
+    }
+
+    Ok(())
+}
+
+fn sha256(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hex::encode(hasher.finalize())
+}
+
+pub(crate) fn verify_checksum(
+    path: &Path,
+    expected: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if expected == "SKIP" {
+        return Ok(());
+    }
+
+    let bytes = std::fs::read(path)?;
+    let hash = sha256(&bytes);
+
+    if hash != expected {
+        return Err(format!(
+            "checksum mismatch for {}: expected {}, got {}",
+            path.display(),
+            expected,
+            hash
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
+pub fn run_package_fn(
+    package_fn: &str,
+    build_dir: &Path,
+    staging_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let script_path = build_dir.join("thanatos_package.sh");
+    let mut script = std::fs::File::create(&script_path)?;
+
+    writeln!(script, "#!/bin/bash")?;
+    writeln!(script, "set -e")?;
+    writeln!(script, "pkgdir={}", staging_dir.to_str().unwrap())?;
+    writeln!(script, "cd {}", build_dir.to_str().unwrap())?;
+    writeln!(script, "{}", package_fn)?;
+
+    Command::new("chmod")
+        .args(["+x", script_path.to_str().unwrap()])
+        .status()?;
+
+    let status = Command::new("bash")
+        .arg(script_path.to_str().unwrap())
+        .current_dir(build_dir)
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("package() failed with status: {}", status).into());
+    }
+
+    Ok(())
+}
+
+fn install_from_staging(staging_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let status = Command::new("cp")
+        .args(["-r", staging_dir.to_str().unwrap(), "/"])
+        .status()?;
+
+    if !status.success() {
+        return Err("failed to install files from staging to root".into());
     }
 
     Ok(())

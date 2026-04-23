@@ -1,6 +1,7 @@
 mod build_file;
+mod db;
 use crate::package::build_file::*;
-use std::path::PathBuf;
+
 enum PackageType {
     Lib,
     Bin,
@@ -19,16 +20,27 @@ impl Package {
         let raw = fetch_build_file(&self.name)?;
         let pkgbuild = parse_pkgbuild(&raw)?;
 
-        let build_dir = PathBuf::from(format!("/tmp/thanatos/{}", self.name));
+        let build_dir = std::env::temp_dir()
+            .join("thanatos")
+            .join("build")
+            .join(&self.name);
+
+        if build_dir.exists() {
+            std::fs::remove_dir_all(&build_dir)?;
+        }
         std::fs::create_dir_all(&build_dir)?;
 
-        for source in &pkgbuild.sources {
-            fetch_source(source, &build_dir)?;
-        }
+        let result = (|| {
+            for source in &pkgbuild.sources {
+                fetch_source(source, &build_dir)?;
+            }
+            run_build_fn(&pkgbuild.build_fn, &build_dir)?;
+            Ok(())
+        })();
 
-        run_build_fn(&pkgbuild.build_fn, &build_dir)?;
+        let _ = std::fs::remove_dir_all(&build_dir);
 
-        Ok(())
+        result
     }
 }
 
@@ -112,7 +124,7 @@ package() {
 
     #[test]
     fn test_run_build_fn_success() {
-        let build_dir = PathBuf::from("/tmp/thanatos/test_build");
+        let build_dir = std::env::temp_dir().join("thanatos_test_build");
         fs::create_dir_all(&build_dir).unwrap();
         let result = run_build_fn("echo 'build ok'", &build_dir);
         assert!(result.is_ok());
@@ -121,10 +133,84 @@ package() {
 
     #[test]
     fn test_run_build_fn_failure() {
-        let build_dir = PathBuf::from("/tmp/thanatos/test_build_fail");
+        let build_dir = std::env::temp_dir().join("thanatos_test_build_fail");
         fs::create_dir_all(&build_dir).unwrap();
         let result = run_build_fn("exit 1", &build_dir);
         assert!(result.is_err());
         fs::remove_dir_all(&build_dir).unwrap();
     }
+}
+
+#[test]
+fn test_verify_checksum_skip() {
+    let tmp = std::env::temp_dir().join("thanatos_test_checksum");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let file = tmp.join("dummy.txt");
+    std::fs::write(&file, b"hello").unwrap();
+    let result = verify_checksum(&file, "SKIP");
+    assert!(result.is_ok());
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn test_verify_checksum_valid() {
+    let tmp = std::env::temp_dir().join("thanatos_test_checksum_valid");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let file = tmp.join("dummy.txt");
+    std::fs::write(&file, b"hello").unwrap();
+
+    let hash = {
+        use sha2::{Digest, Sha256};
+        hex::encode(Sha256::new().chain_update(b"hello").finalize())
+    };
+
+    let result = verify_checksum(&file, &hash);
+    assert!(result.is_ok());
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn test_verify_checksum_invalid() {
+    let tmp = std::env::temp_dir().join("thanatos_test_checksum_invalid");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let file = tmp.join("dummy.txt");
+    std::fs::write(&file, b"hello").unwrap();
+    let result = verify_checksum(&file, "notarealhash");
+    assert!(result.is_err());
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn test_run_package_fn_success() {
+    let build_dir = std::env::temp_dir().join("thanatos_test_package_fn");
+    let staging_dir = build_dir.join("pkg");
+    std::fs::create_dir_all(&staging_dir).unwrap();
+    let result = run_package_fn("touch $pkgdir/installed.txt", &build_dir, &staging_dir);
+    assert!(result.is_ok());
+    assert!(staging_dir.join("installed.txt").exists());
+    std::fs::remove_dir_all(&build_dir).unwrap();
+}
+
+#[test]
+fn test_run_package_fn_failure() {
+    let build_dir = std::env::temp_dir().join("thanatos_test_package_fn_fail");
+    let staging_dir = build_dir.join("pkg");
+    std::fs::create_dir_all(&staging_dir).unwrap();
+    let result = run_package_fn("exit 1", &build_dir, &staging_dir);
+    assert!(result.is_err());
+    std::fs::remove_dir_all(&build_dir).unwrap();
+}
+
+#[test]
+fn test_collect_files() {
+    let tmp = std::env::temp_dir().join("thanatos_test_collect");
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::write(tmp.join("a.txt"), b"a").unwrap();
+    std::fs::write(tmp.join("b.txt"), b"b").unwrap();
+
+    let files = collect_files(&tmp).unwrap();
+    assert_eq!(files.len(), 2);
+    assert!(files.contains(&"/a.txt".to_string()));
+    assert!(files.contains(&"/b.txt".to_string()));
+    std::fs::remove_dir_all(&tmp).unwrap();
 }
