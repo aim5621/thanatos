@@ -28,9 +28,8 @@ pub struct System {
 impl System {
     pub fn build(&self) -> Result<(), Box<dyn std::error::Error>> {
         for package in &self.packages {
-            package.install(&package.name)?;
+            package.install()?;
         }
-        //TODO: STUB
         Ok(())
     }
 }
