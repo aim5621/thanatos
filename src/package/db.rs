@@ -26,6 +26,21 @@ pub struct PackageDb {
 }
 
 impl PackageDb {
+    pub fn load_from(path: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
+        if !path.exists() {
+            return Ok(PackageDb::default());
+        }
+        let content = fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&content)?)
+    }
+
+    pub fn save_to(&self, path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, serde_json::to_string_pretty(self)?)?;
+        Ok(())
+    }
     pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
         let path = get_db_path();
 

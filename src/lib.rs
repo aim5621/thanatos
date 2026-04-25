@@ -1,29 +1,15 @@
 #![allow(dead_code)]
 use std::vec::Vec;
+mod access_control;
 mod networking;
 mod package;
 use crate::package::*;
 
-pub struct User {
-    name: String,
-    primary_group: Group,
-    secondary_groups: Vec<Group>,
-    uid: u32,
-    home_dir: String,
-    shell: String,
-}
-
-pub struct Group {
-    name: String,
-    gid: u32,
-    group_list: Vec<User>,
-}
-
 pub struct System {
     packages: Vec<Package>,
     hostname: String,
-    users: Vec<User>,
-    groups: Vec<Group>,
+    users: Vec<access_control::user::User>,
+    groups: Vec<access_control::group::Group>,
 }
 
 impl System {
@@ -31,7 +17,9 @@ impl System {
         for package in &self.packages {
             package.install()?;
         }
+
         networking::hostname::set_hostname(&self.hostname)?;
+
         Ok(())
     }
 }
