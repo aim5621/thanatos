@@ -1,6 +1,6 @@
 use std::{fs::OpenOptions, io::Write};
 
-pub fn set_hostname(hostname: String) -> Result<(), Box<dyn std::error::Error>> {
+pub fn set_hostname(hostname: &str) -> Result<(), Box<dyn std::error::Error>> {
     validate_hostname(&hostname)?;
 
     let mut hosts_file = OpenOptions::new()

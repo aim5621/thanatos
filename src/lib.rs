@@ -31,6 +31,7 @@ impl System {
         for package in &self.packages {
             package.install()?;
         }
+        networking::hostname::set_hostname(&self.hostname)?;
         Ok(())
     }
 }
