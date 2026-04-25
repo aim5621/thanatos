@@ -3,6 +3,7 @@ use std::vec::Vec;
 mod access_control;
 mod networking;
 mod package;
+use crate::access_control::application::{apply_groups, apply_users};
 use crate::package::*;
 
 pub struct System {
@@ -14,12 +15,12 @@ pub struct System {
 
 impl System {
     pub fn build(&self) -> Result<(), Box<dyn std::error::Error>> {
+        apply_groups(&self.groups)?;
+        apply_users(&self.users)?;
         for package in &self.packages {
             package.install()?;
         }
-
         networking::hostname::set_hostname(&self.hostname)?;
-
         Ok(())
     }
 }
