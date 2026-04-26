@@ -1,4 +1,4 @@
-use crate::package::db::{InstalledPackage, PackageDb};
+use crate::package::db::PackageDb;
 use reqwest::blocking::get;
 use sha2::{Digest, Sha256};
 use std::io::Write;
@@ -165,13 +165,15 @@ impl PkgBuild {
 
         install_from_staging(&staging_dir)?;
 
-        db.insert(InstalledPackage {
-            name: self.name.clone(),
-            version: self.version.clone(),
-            release: self.release,
-            depends: self.depends.clone(),
-            files: installed_files,
-        });
+        let mut pkg = crate::package::db::Package::new(&self.name);
+        pkg.depends = self.depends.clone();
+        pkg.mark_installed(
+            self.version.clone(),
+            self.release,
+            installed_files,
+            crate::package::db::InstallReason::Explicit,
+        );
+        db.insert(pkg);
 
         db.save()?;
 

@@ -4,7 +4,7 @@ mod access_control;
 mod networking;
 mod package;
 use crate::access_control::application::{apply_groups, apply_users};
-use crate::package::*;
+use crate::package::{Package, fetch_build_file, parse_pkgbuild};
 
 pub struct System {
     packages: Vec<Package>,
@@ -18,7 +18,9 @@ impl System {
         apply_groups(&self.groups)?;
         apply_users(&self.users)?;
         for package in &self.packages {
-            package.install()?;
+            let raw = fetch_build_file(&package.name)?;
+            let pkgbuild = parse_pkgbuild(&raw)?;
+            pkgbuild.process()?;
         }
         networking::hostname::set_hostname(&self.hostname)?;
         Ok(())
