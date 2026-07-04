@@ -1,5 +1,7 @@
 use crate::access_control::user::User;
+use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize)]
 pub struct Group {
     pub name: String,
     pub gid: u32,

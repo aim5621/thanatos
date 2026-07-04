@@ -5,12 +5,14 @@ mod networking;
 mod package;
 use crate::access_control::application::{apply_groups, apply_users};
 use crate::package::{Package, fetch_build_file, parse_pkgbuild};
+use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize)]
 pub struct System {
-    packages: Vec<Package>,
-    hostname: String,
-    users: Vec<access_control::user::User>,
-    groups: Vec<access_control::group::Group>,
+    pub packages: Vec<Package>,
+    pub hostname: String,
+    pub users: Vec<access_control::user::User>,
+    pub groups: Vec<access_control::group::Group>,
 }
 
 impl System {

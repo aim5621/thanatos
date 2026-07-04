@@ -1,3 +1,6 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
 pub struct User {
     pub name: String,
     pub uid: u32,
@@ -8,6 +11,7 @@ pub struct User {
     pub password: Password,
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum Shell {
     Bash,
     Zsh,
@@ -28,6 +32,7 @@ impl Shell {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum Password {
     Locked,
     Hashed(String),
