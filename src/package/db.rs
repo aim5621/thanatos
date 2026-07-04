@@ -18,6 +18,16 @@ pub enum InstallReason {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub enum PackageFormat {
+    AUR,
+    Deb,
+    Appimage,
+    Tar,
+    Rpm,
+    Pending,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub enum InstallState {
     Installed {
         version: String,
@@ -33,6 +43,7 @@ pub struct Package {
     pub name: String,
     pub depends: Vec<String>,
     pub state: InstallState,
+    pub format: PackageFormat,
 }
 
 impl Package {
@@ -41,6 +52,7 @@ impl Package {
             name: name.to_string(),
             depends: vec![],
             state: InstallState::Pending,
+            format: PackageFormat::AUR,
         }
     }
 
@@ -83,6 +95,7 @@ impl Package {
             reason,
         };
     }
+
 }
 
 #[derive(Serialize, Deserialize, Default)]
