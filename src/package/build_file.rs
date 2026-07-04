@@ -251,9 +251,11 @@ pub fn run_build_fn(build_fn: &str, build_dir: &Path) -> Result<(), Box<dyn std:
     let script_path = build_dir.join("thanatos_build.sh");
     let mut script = std::fs::File::create(&script_path)?;
 
+    let src_dir = find_source_dir(build_dir)?;
+
     writeln!(script, "#!/bin/bash")?;
     writeln!(script, "set -e")?;
-    writeln!(script, "cd {}", build_dir.to_str().unwrap())?;
+    writeln!(script, "cd {}", src_dir.to_str().unwrap())?;
     writeln!(script, "{}", build_fn)?;
 
     Command::new("chmod")
@@ -270,6 +272,16 @@ pub fn run_build_fn(build_fn: &str, build_dir: &Path) -> Result<(), Box<dyn std:
     }
 
     Ok(())
+}
+
+fn find_source_dir(build_dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    for entry in std::fs::read_dir(build_dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            return Ok(entry.path());
+        }
+    }
+    Ok(build_dir.to_path_buf())
 }
 
 fn sha256(data: &[u8]) -> String {
