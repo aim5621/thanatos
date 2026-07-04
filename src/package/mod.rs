@@ -1,6 +1,5 @@
 mod build_file;
-mod db;
+pub mod db;
 
 pub use self::build_file::{fetch_build_file, parse_pkgbuild};
-pub use self::db::Package;
-pub use self::db::PackageFormat;
+pub use self::db::{InstallReason, InstallState, Package, PackageDb, PackageFormat};

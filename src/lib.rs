@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 use std::vec::Vec;
-mod access_control;
+pub mod access_control;
 mod networking;
 mod package;
+pub mod prelude;
 use crate::access_control::application::{apply_groups, apply_users};
 use crate::package::{Package, PackageFormat, fetch_build_file, parse_pkgbuild};
 use serde::{Deserialize, Serialize};
