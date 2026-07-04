@@ -32,6 +32,54 @@ pub struct PkgBuild {
     pub package_fn: String,
 }
 
+fn parse_array(line: &str, lines: &mut std::iter::Peekable<std::str::Lines>) -> Vec<String> {
+    let mut result = vec![];
+    let mut buf = line.to_string();
+
+    while !buf.contains(')') {
+        if let Some(next) = lines.next() {
+            buf.push_str(next);
+        } else {
+            break;
+        }
+    }
+
+    let inner = buf
+        .split('(')
+        .nth(1)
+        .unwrap_or("")
+        .split(')')
+        .next()
+        .unwrap_or("");
+    for item in inner.split_whitespace() {
+        let clean = item.trim_matches('\'').trim_matches('"').to_string();
+        if !clean.is_empty() {
+            result.push(clean);
+        }
+    }
+    result
+}
+
+fn parse_function(lines: &mut std::iter::Peekable<std::str::Lines>) -> String {
+    let mut body = String::new();
+    let mut depth = 0;
+
+    for line in lines.by_ref() {
+        if line.contains('{') {
+            depth += 1;
+        }
+        if line.contains('}') {
+            if depth == 0 {
+                break;
+            }
+            depth -= 1;
+        }
+        body.push_str(line);
+        body.push('\n');
+    }
+    body
+}
+
 pub fn parse_pkgbuild(content: &str) -> Result<PkgBuild, Box<dyn std::error::Error>> {
     let mut name = String::new();
     let mut version = String::new();
@@ -83,54 +131,6 @@ pub fn parse_pkgbuild(content: &str) -> Result<PkgBuild, Box<dyn std::error::Err
         build_fn,
         package_fn,
     })
-}
-
-fn parse_array(line: &str, lines: &mut std::iter::Peekable<std::str::Lines>) -> Vec<String> {
-    let mut result = vec![];
-    let mut buf = line.to_string();
-
-    while !buf.contains(')') {
-        if let Some(next) = lines.next() {
-            buf.push_str(next);
-        } else {
-            break;
-        }
-    }
-
-    let inner = buf
-        .split('(')
-        .nth(1)
-        .unwrap_or("")
-        .split(')')
-        .next()
-        .unwrap_or("");
-    for item in inner.split_whitespace() {
-        let clean = item.trim_matches('\'').trim_matches('"').to_string();
-        if !clean.is_empty() {
-            result.push(clean);
-        }
-    }
-    result
-}
-
-fn parse_function(lines: &mut std::iter::Peekable<std::str::Lines>) -> String {
-    let mut body = String::new();
-    let mut depth = 0;
-
-    for line in lines.by_ref() {
-        if line.contains('{') {
-            depth += 1;
-        }
-        if line.contains('}') {
-            if depth == 0 {
-                break;
-            }
-            depth -= 1;
-        }
-        body.push_str(line);
-        body.push('\n');
-    }
-    body
 }
 
 impl PkgBuild {
