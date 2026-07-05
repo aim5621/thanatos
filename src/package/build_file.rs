@@ -159,7 +159,8 @@ impl PkgBuild {
         std::fs::create_dir_all(&staging_dir)?;
 
         for (source, checksum) in self.sources.iter().zip(self.checksums.iter()) {
-            let fetched = fetch_source(source, &build_dir)?;
+            let fetched = fetch_source(source, &build_dir)
+                .map_err(|e| format!("package '{}': {}", self.name, e))?;
             verify_checksum(&fetched, checksum)?;
         }
 
@@ -224,8 +225,10 @@ pub fn parse_source(source: &str) -> Source {
 
 pub fn fetch_source(source: &str, dest: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
     match parse_source(source) {
-        Source::Tarball(url) => fetch_tarball(&url, dest),
-        Source::Git(url) => fetch_git(&url, dest),
+        Source::Tarball(url) => fetch_tarball(&url, dest)
+            .map_err(|e| format!("tarball source '{}' failed: {}", source, e).into()),
+        Source::Git(url) => fetch_git(&url, dest)
+            .map_err(|e| format!("git source '{}' failed: {}", source, e).into()),
     }
 }
 
@@ -233,7 +236,13 @@ fn fetch_tarball(url: &str, dest: &Path) -> Result<PathBuf, Box<dyn std::error::
     let filename = url.split('/').last().unwrap_or("source.tar.gz");
     let out_path = dest.join(filename);
 
-    let bytes = get(url)?.bytes()?;
+    let response =
+        get(url).map_err(|e| format!("failed to fetch tarball from '{}': {}", url, e))?;
+
+    let bytes = response
+        .bytes()
+        .map_err(|e| format!("failed to read response body from '{}': {}", url, e))?;
+
     let mut file = std::fs::File::create(&out_path)?;
     file.write_all(&bytes)?;
 
