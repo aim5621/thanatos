@@ -120,6 +120,16 @@ pub fn parse_pkgbuild(content: &str) -> Result<PkgBuild, Box<dyn std::error::Err
         }
     }
 
+    sources = sources
+        .into_iter()
+        .map(|s| {
+            s.replace("$pkgname", &name)
+                .replace("${pkgname}", &name)
+                .replace("$pkgver", &version)
+                .replace("${pkgver}", &version)
+        })
+        .collect();
+
     Ok(PkgBuild {
         name,
         version,
