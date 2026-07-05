@@ -1,17 +1,17 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct User {
     pub name: String,
-    pub uid: u32,
-    pub primary_gid: u32,
+    pub uid: Option<u32>,
+    pub primary_gid: Option<u32>,
     pub secondary_gids: Vec<u32>,
     pub home_dir: String,
     pub shell: Shell,
     pub password: Password,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum Shell {
     Bash,
     Zsh,
@@ -32,23 +32,33 @@ impl Shell {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum Password {
     Locked,
     Hashed(String),
 }
 
 impl User {
-    pub fn new(name: &str, uid: u32, primary_gid: u32) -> Self {
+    pub fn new(name: &str) -> Self {
         User {
             name: name.to_string(),
-            uid,
-            primary_gid,
+            uid: None,
+            primary_gid: None,
             secondary_gids: Vec::new(),
             home_dir: format!("/home/{}", name),
             shell: Shell::Bash,
             password: Password::Locked,
         }
+    }
+
+    pub fn uid(mut self, uid: u32) -> Self {
+        self.uid = Some(uid);
+        self
+    }
+
+    pub fn primary_group(mut self, gid: u32) -> Self {
+        self.primary_gid = Some(gid);
+        self
     }
 
     pub fn shell(mut self, shell: Shell) -> Self {
@@ -77,6 +87,6 @@ impl User {
     }
 
     pub fn in_group(&self, gid: u32) -> bool {
-        self.primary_gid == gid || self.secondary_gids.contains(&gid)
+        self.primary_gid == Some(gid) || self.secondary_gids.contains(&gid)
     }
 }

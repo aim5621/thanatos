@@ -1,15 +1,16 @@
-use std::{fs::OpenOptions, io::Write};
+use std::fs;
+use std::process::Command;
 
 pub fn set_hostname(hostname: &str) -> Result<(), Box<dyn std::error::Error>> {
-    validate_hostname(&hostname)?;
+    validate_hostname(hostname)?;
 
-    let mut hosts_file = OpenOptions::new()
-        .read(true)
-        .append(true)
-        .create(true)
-        .open("/etc/hostname")?;
+    fs::write("/etc/hostname", hostname)?;
 
-    hosts_file.write_all(hostname.as_bytes())?;
+    match Command::new("hostname").arg(hostname).status() {
+        Ok(status) if status.success() => {}
+        Ok(status) => eprintln!("warning: 'hostname' command exited with status {}", status),
+        Err(e) => eprintln!("warning: could not run 'hostname' command: {}", e),
+    }
 
     Ok(())
 }

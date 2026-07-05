@@ -13,7 +13,7 @@ fn http_client() -> &'static Client {
     CLIENT.get_or_init(|| {
         Client::builder()
             .local_address(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
-            .user_agent("Mozilla/5.0 (X11; Linux x86_64) Thanatos/0.1.0")
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             .build()
             .expect("failed to build http client")
     })
@@ -25,19 +25,53 @@ pub fn fetch_build_file(package_name: &str) -> Result<String, Box<dyn std::error
         package_name
     );
 
-    let response = http_client().get(&url).send()?;
+    let output = std::process::Command::new("curl")
+        .args(["-s", "-f", &url])
+        .output()?;
 
-    if response.status() == 404 {
-        return Err(format!("package '{}' not found on AUR", package_name).into());
+    if !output.status.success() {
+        return Err(format!("curl failed to fetch PKGBUILD for '{}'", package_name).into());
     }
 
-    Ok(response.text()?)
+    let body = String::from_utf8(output.stdout)?;
+
+    if body.contains("<!doctype html") || body.contains("<html") {
+        return Err(format!("AUR returned HTML for '{}' (bot protection)", package_name).into());
+    }
+
+    Ok(body)
 }
+
+//    pub fn fetch_build_file(package_name: &str) -> Result<String, Box<dyn std::error::Error>> {
+//        let url = format!(
+//            "https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h={}",
+//            package_name
+//        );
+//
+//        let response = http_client().get(&url).send()?;
+//
+//        if response.status() == 404 {
+//            return Err(format!("package '{}' not found on AUR", package_name).into());
+//        }
+//
+//        let body = response.text()?;
+//
+//        if body.contains("<!doctype html") || body.contains("<html") {
+//            return Err(format!(
+//                "AUR returned an HTML page instead of PKGBUILD for '{}' (likely bot protection)",
+//                package_name
+//            )
+//            .into());
+//        }
+//
+//        Ok(body)
+//    }
 
 pub struct PkgBuild {
     pub name: String,
     pub version: String,
     pub release: u32,
+    pub url: String,
     pub depends: Vec<String>,
     pub make_depends: Vec<String>,
     pub sources: Vec<String>,
@@ -56,6 +90,7 @@ pub fn parse_pkgbuild(content: &str) -> Result<PkgBuild, Box<dyn std::error::Err
     let mut checksums = vec![];
     let mut build_fn = String::new();
     let mut package_fn = String::new();
+    let mut url = String::new();
 
     let mut lines = content.lines().peekable();
 
@@ -79,8 +114,14 @@ pub fn parse_pkgbuild(content: &str) -> Result<PkgBuild, Box<dyn std::error::Err
             sources = parse_array(line, &mut lines);
         } else if line.starts_with("sha256sums=") {
             checksums = parse_array(line, &mut lines);
-        } else if line.starts_with("md5sums=") {
+        } else if line.starts_with("md5sums=") || line.starts_with("sha512sums=") {
             checksums = vec!["SKIP".to_string(); parse_array(line, &mut lines).len()];
+        } else if line.starts_with("url=") {
+            url = line
+                .trim_start_matches("url=")
+                .trim_matches('\'')
+                .trim_matches('"')
+                .to_string();
         } else if line.starts_with("build()") {
             build_fn = parse_function(&mut lines);
         } else if line.starts_with("package()") {
@@ -91,10 +132,19 @@ pub fn parse_pkgbuild(content: &str) -> Result<PkgBuild, Box<dyn std::error::Err
     sources = sources
         .into_iter()
         .map(|s| {
-            s.replace("${pkgname}", &name)
+            let expanded = s
+                .replace("${pkgname}", &name)
                 .replace("$pkgname", &name)
                 .replace("${pkgver}", &version)
                 .replace("$pkgver", &version)
+                .replace("${url}", &url)
+                .replace("$url", &url);
+
+            if let Some(idx) = expanded.find("::") {
+                expanded[idx + 2..].to_string()
+            } else {
+                expanded
+            }
         })
         .collect();
 
@@ -102,6 +152,7 @@ pub fn parse_pkgbuild(content: &str) -> Result<PkgBuild, Box<dyn std::error::Err
         name,
         version,
         release,
+        url,
         depends,
         make_depends,
         sources,
@@ -161,6 +212,16 @@ fn parse_function(lines: &mut std::iter::Peekable<std::str::Lines>) -> String {
 
 impl PkgBuild {
     pub fn process(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let build_dir = PathBuf::from(format!("/tmp/thanatos/{}-{}", self.name, self.version));
+
+        if build_dir.exists() {
+            std::fs::remove_dir_all(&build_dir)?;
+        }
+        let staging_dir = build_dir.join("pkg");
+
+        std::fs::create_dir_all(&build_dir)?;
+        std::fs::create_dir_all(&staging_dir)?;
+
         let mut db = PackageDb::load()?;
 
         if db.is_installed(&self.name) {
@@ -192,11 +253,17 @@ impl PkgBuild {
         }
 
         if !self.build_fn.is_empty() {
-            run_build_fn(&self.build_fn, &build_dir)?;
+            run_build_fn(&self.build_fn, &build_dir, &self.name, &self.version)?;
         }
 
         if !self.package_fn.is_empty() {
-            run_package_fn(&self.package_fn, &build_dir, &staging_dir)?;
+            run_package_fn(
+                &self.package_fn,
+                &build_dir,
+                &staging_dir,
+                &self.name,
+                &self.version,
+            )?;
         }
 
         let installed_files = collect_files(&staging_dir)?;
@@ -246,11 +313,17 @@ impl PkgBuild {
         }
 
         if !self.build_fn.is_empty() {
-            run_build_fn(&self.build_fn, &build_dir)?;
+            run_build_fn(&self.build_fn, &build_dir, &self.name, &self.version)?;
         }
 
         if !self.package_fn.is_empty() {
-            run_package_fn(&self.package_fn, &build_dir, &staging_dir)?;
+            run_package_fn(
+                &self.package_fn,
+                &build_dir,
+                &staging_dir,
+                &self.name,
+                &self.version,
+            )?;
         }
 
         let installed_files = collect_files(&staging_dir)?;
@@ -280,15 +353,26 @@ impl PkgBuild {
             if db.is_installed(dep_name) {
                 continue;
             }
+
             println!("resolving dependency '{}' for '{}'", dep_name, self.name);
+
+            if is_available_in_pacman(dep_name) {
+                install_via_pacman(dep_name)?;
+                continue;
+            }
+
+            println!("'{}' not found in official repos, trying AUR...", dep_name);
             match fetch_build_file(dep_name) {
                 Ok(raw) => {
                     let dep_pkgbuild = parse_pkgbuild(&raw)?;
                     dep_pkgbuild.process_as_dependency()?;
                 }
-                Err(_) => {
-                    println!("'{}' not found on AUR, trying pacman...", dep_name);
-                    install_via_pacman(dep_name)?;
+                Err(e) => {
+                    return Err(format!(
+                        "dependency '{}' not found in pacman or AUR: {}",
+                        dep_name, e
+                    )
+                    .into());
                 }
             }
         }
@@ -297,17 +381,21 @@ impl PkgBuild {
     }
 }
 
+fn is_available_in_pacman(package_name: &str) -> bool {
+    Command::new("pacman")
+        .args(["-Si", package_name])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
 fn install_via_pacman(package_name: &str) -> Result<(), Box<dyn std::error::Error>> {
     let status = Command::new("pacman")
         .args(["-S", "--noconfirm", "--needed", package_name])
         .status()?;
 
     if !status.success() {
-        return Err(format!(
-            "failed to install '{}' via pacman (not found on AUR or in official repos)",
-            package_name
-        )
-        .into());
+        return Err(format!("failed to install '{}' via pacman", package_name).into());
     }
 
     println!("installed '{}' via pacman", package_name);
@@ -354,21 +442,13 @@ fn fetch_tarball(url: &str, dest: &Path) -> Result<PathBuf, Box<dyn std::error::
     let filename = url.split('/').last().unwrap_or("source.tar.gz");
     let out_path = dest.join(filename);
 
-    let response = http_client()
-        .get(url)
-        .send()
-        .map_err(|e| format!("failed to fetch tarball from '{}': {}", url, e))?;
+    let status = Command::new("curl")
+        .args(["-f", "-L", "-o", out_path.to_str().unwrap(), url])
+        .status()?;
 
-    if !response.status().is_success() {
-        return Err(format!("fetching '{}' returned HTTP {}", url, response.status()).into());
+    if !status.success() {
+        return Err(format!("curl failed to fetch tarball from '{}'", url).into());
     }
-
-    let bytes = response
-        .bytes()
-        .map_err(|e| format!("failed to read response body from '{}': {}", url, e))?;
-
-    let mut file = std::fs::File::create(&out_path)?;
-    file.write_all(&bytes)?;
 
     Command::new("tar")
         .args([
@@ -393,22 +473,35 @@ fn fetch_git(url: &str, dest: &Path) -> Result<PathBuf, Box<dyn std::error::Erro
 fn find_source_dir(build_dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
     for entry in std::fs::read_dir(build_dir)? {
         let entry = entry?;
-        if entry.file_type()?.is_dir() {
+        let name = entry.file_name();
+        eprintln!(
+            "DEBUG: found entry '{}' in build_dir",
+            name.to_string_lossy()
+        );
+        if entry.file_type()?.is_dir() && name.to_string_lossy() != "pkg" {
+            eprintln!("DEBUG: selected source dir: {}", entry.path().display());
             return Ok(entry.path());
         }
     }
+    eprintln!("DEBUG: no suitable source dir found, falling back to build_dir itself");
     Ok(build_dir.to_path_buf())
 }
 
-pub fn run_build_fn(build_fn: &str, build_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_build_fn(
+    build_fn: &str,
+    build_dir: &Path,
+    name: &str,
+    version: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let script_path = build_dir.join("thanatos_build.sh");
     let mut script = std::fs::File::create(&script_path)?;
 
-    let src_dir = find_source_dir(build_dir)?;
-
     writeln!(script, "#!/bin/bash")?;
     writeln!(script, "set -e")?;
-    writeln!(script, "cd {}", src_dir.to_str().unwrap())?;
+    writeln!(script, "pkgname={}", name)?;
+    writeln!(script, "pkgver={}", version)?;
+    writeln!(script, "srcdir={}", build_dir.to_str().unwrap())?;
+    writeln!(script, "cd {}", build_dir.to_str().unwrap())?;
     writeln!(script, "{}", build_fn)?;
 
     Command::new("chmod")
@@ -461,16 +554,19 @@ pub fn run_package_fn(
     package_fn: &str,
     build_dir: &Path,
     staging_dir: &Path,
+    name: &str,
+    version: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let script_path = build_dir.join("thanatos_package.sh");
     let mut script = std::fs::File::create(&script_path)?;
 
-    let src_dir = find_source_dir(build_dir)?;
-
     writeln!(script, "#!/bin/bash")?;
     writeln!(script, "set -e")?;
+    writeln!(script, "pkgname={}", name)?;
+    writeln!(script, "pkgver={}", version)?;
+    writeln!(script, "srcdir={}", build_dir.to_str().unwrap())?;
     writeln!(script, "pkgdir={}", staging_dir.to_str().unwrap())?;
-    writeln!(script, "cd {}", src_dir.to_str().unwrap())?;
+    writeln!(script, "cd {}", build_dir.to_str().unwrap())?;
     writeln!(script, "{}", package_fn)?;
 
     Command::new("chmod")
